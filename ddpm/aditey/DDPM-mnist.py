@@ -72,7 +72,7 @@ class ResBlock(torch.nn.Module):
 
         super().__init__()
 
-        self.ReLU = nn.ReLU(inplace=True)
+        self.ReLU = nn.ReLU(inplace = True)
         
         self.group_norm_1 = nn.GroupNorm(num_groups = num_groups, num_channels = num_channels)
         self.group_norm_2 = nn.GroupNorm(num_groups = num_groups, num_channels = num_channels)
@@ -242,7 +242,7 @@ def set_seed(seed: int = 42):
     random.seed(seed)
 
 
-def sample_images(model, scheduler, device, num_time_steps, epoch, save_dir="images"):
+def sample_images(model, scheduler, device, num_time_steps, epoch, save_dir="mnist-images"):
     import os
     os.makedirs(save_dir, exist_ok=True)
 
@@ -267,7 +267,7 @@ def sample_images(model, scheduler, device, num_time_steps, epoch, save_dir="ima
         img = noise.squeeze(0).cpu()
         img = (img - img.min()) / (img.max() - img.min() + 1e-8)
 
-        plt.imsave(f"{save_dir}/epoch_{epoch}.png", img.permute(1, 2, 0).numpy())
+        plt.imsave(f"{save_dir}/epoch_{epoch}.png", img.squeeze(0).numpy(), cmap='gray')
 
     model.train()
 
@@ -326,9 +326,9 @@ def train(batch_size: int = 64, num_time_steps: int = 1000, num_epochs: int = 30
             print(f"Generating sample at epoch {epoch+1}")
             sample_images(ema.module, scheduler, device, num_time_steps, epoch+1)
 
-    checkpoint = {'weights': model.state_dict(), 'optimizer': optimizer.state_dict(), 'ema': ema.state_dict()}
-    
-    torch.save(checkpoint, 'checkpoints/ddpm_checkpoint.pth')
+        checkpoint = {'weights': model.state_dict(), 'optimizer': optimizer.state_dict(), 'ema': ema.state_dict()}
+        
+        torch.save(checkpoint, 'mnist-checkpoints/ddpm_checkpoint.pth')
 
 
 
@@ -349,9 +349,8 @@ def display_reverse(images: list):
 
 
 
-def inference(checkpoint_path: str = "", num_time_steps: int = 1000, ema_decay: float = 0.9999, ):
-
-    checkpoint = torch.load(checkpoint_path)
+def inference(checkpoint_path: str = "", num_time_steps: int = 1000, ema_decay: float = 0.9999):
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     
     model = UNET().to(device)
     model.load_state_dict(checkpoint['weights'])
@@ -361,50 +360,37 @@ def inference(checkpoint_path: str = "", num_time_steps: int = 1000, ema_decay: 
     
     scheduler = DDPM_Scheduler(num_time_steps=num_time_steps)
     
-    times = [0,15,50,100,200,300,400,550,700,999]
-    
+    times = [0, 15, 50, 100, 200, 300, 400, 550, 700, 999]
     images = []
 
+    model.eval()
     with torch.no_grad():
-
-        model = ema.module.eval()
-        
-        for index in range(10):
-        
+        for index in range(20):
             noise = torch.randn(1, 1, 32, 32).to(device)
         
             for timestep in reversed(range(1, num_time_steps)):
-        
-                timestep_list = torch.tensor([timestep], device = device)
+                timestep_tensor = torch.tensor([timestep], device=device)
 
-                beta_t = scheduler.beta[timestep_list].view(1, 1, 1, 1).to(device)
-                alpha_t = scheduler.alpha[timestep_list].view(1, 1, 1, 1).to(device)
+                beta_t = scheduler.beta[timestep_tensor].view(1, 1, 1, 1)
+                alpha_t = scheduler.alpha[timestep_tensor].view(1, 1, 1, 1)
 
-                temp = beta_t / ((torch.sqrt(1 - alpha_t)) * (torch.sqrt(1 - beta_t)))
-
-                noise = (1/(torch.sqrt(1 - beta_t)))*noise - (temp*model(noise, timestep_list))
+                pred_noise = ema.module(noise, timestep_tensor)
+                temp = beta_t / (torch.sqrt(1 - alpha_t) * torch.sqrt(1 - beta_t))
+                noise = (1 / torch.sqrt(1 - beta_t)) * noise - (temp * pred_noise)
                 
-                if timestep_list[0] in times:
+                if timestep > 1:
+                    epsilon_noise = torch.randn_like(noise)
+                    noise = noise + (epsilon_noise * torch.sqrt(beta_t))
+                
+                if timestep in times:
                     images.append(noise.detach().cpu())
-                
-                epsilon_noise = torch.randn(1, 1, 32, 32).to(device)
-                
-                noise = noise + (epsilon_noise*torch.sqrt(beta_t))
         
-            temp = scheduler.beta[0]/( (torch.sqrt(1 - scheduler.alpha[0]))*(torch.sqrt(1 - scheduler.beta[0])) )
-
-            timestep_0 = torch.tensor([0], device = device)
-                        
-            new_image = (1/(torch.sqrt(1-scheduler.beta[0])))*noise - (temp*model(noise, timestep_0))
-
-            images.append(new_image)
-
-            new_image = rearrange(new_image.squeeze(0), 'c h w -> h w c').detach()
-            new_image = new_image.numpy()
-            new_image = (new_image - new_image.min()) / (new_image.max() - new_image.min() + 1e-8)
+            final_img = noise.detach().cpu().squeeze()
+            final_img = (final_img - final_img.min()) / (final_img.max() - final_img.min() + 1e-8)
             
-            plt.imsave(f"images/sample_{index}.png", new_image)
+            plt.imsave(f"mnist-images/sample_{index}.png", final_img.numpy(), cmap='gray')
             
+            images.append(noise.detach().cpu())
             display_reverse(images)
             
             images = []
@@ -413,8 +399,8 @@ def inference(checkpoint_path: str = "", num_time_steps: int = 1000, ema_decay: 
 
 def main():
 
-    train(checkpoint_path = 'checkpoints/ddpm_checkpoint.pth', lr = 2e-5, num_epochs = 75)
-    inference('checkpoints/ddpm_checkpoint.pth')
+    train(checkpoint_path = 'mnist-checkpoints/ddpm_checkpoint.pth', lr = 2e-5, num_epochs = 75)
+    inference('mnist-checkpoints/ddpm_checkpoint.pth')
     
 
 if __name__ == '__main__':

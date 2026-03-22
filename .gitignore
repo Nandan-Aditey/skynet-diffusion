@@ -11,3 +11,7 @@ data/
 
 # VSCode
 .vscode/
+
+# Checkpoints
+ddpm/aditey/cifar-checkpoints/
+ddpm/aditey/mnist-checkpoints/

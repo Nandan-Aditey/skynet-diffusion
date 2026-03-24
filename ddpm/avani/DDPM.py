@@ -4,7 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, utils
+import sys
 from tqdm import tqdm
+import numpy as np
+from torchvision.models import inception_v3, Inception_V3_Weights
 
 # Ensure Mac GPU fallback for specialized operations
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
@@ -126,7 +129,7 @@ def extract_cifar_to_files(root="./data/cifar_images"):
         os.makedirs(os.path.join(root, cls), exist_ok=True)
 
     counts = [0] * 10
-    for img_tensor, label in tqdm(raw, desc="Saving images"):
+    for img_tensor, label in tqdm(raw, desc="Saving images", file=sys.stdout):
         cls = CIFAR10_CLASSES[label]
         path = os.path.join(root, cls, f"{counts[label]:05d}.png")
         _save(img_tensor, path)
@@ -144,6 +147,76 @@ def save_samples_individually(samples, epoch, out_dir="./samples"):
         utils.save_image(img, path)
 
 
+def compute_fid(model, loader, device, n_samples=1000, img_size=32):
+    """Compute FID between real CIFAR-10 images and model samples.
+
+    Strategy: run InceptionV3 feature extraction on the accelerator (CUDA or MPS)
+    in float32, then compute the Fréchet distance on CPU via numpy/scipy (float64).
+    This avoids the MPS float64 limitation while still using the GPU for the
+    expensive part (InceptionV3 forward passes).
+    For CUDA, the generative model is temporarily offloaded to CPU first so
+    InceptionV3 has enough VRAM.
+    """
+    import time
+    from scipy import linalg
+    t0 = time.perf_counter()
+
+    # Collect real images on CPU (no GPU needed yet)
+    real_batches, real_count = [], 0
+    for images, _ in loader:
+        real_batches.append(((images.clamp(-1, 1) + 1) / 2 * 255).to(torch.uint8))
+        real_count += images.shape[0]
+        if real_count >= n_samples:
+            break
+
+    # Generate fakes while the model is still on its original device
+    fake_batches, fake_count = [], 0
+    while fake_count < n_samples:
+        n = min(64, n_samples - fake_count)
+        samples = model.sample(n_samples=n, size=img_size)  # already in [0, 1]
+        fake_batches.append((samples * 255).to(torch.uint8).cpu())
+        fake_count += n
+
+    # For CUDA: offload generative model to free VRAM for InceptionV3
+    if device.type == "cuda":
+        model.cpu()
+        torch.cuda.empty_cache()
+
+    # Load InceptionV3 on the accelerator (float32 — works on both CUDA and MPS)
+    inception = inception_v3(weights=Inception_V3_Weights.DEFAULT)
+    inception.fc = nn.Identity()  # return 2048-d pool3 features instead of logits
+    inception = inception.to(device).eval()
+
+    def extract_features(batches):
+        feats = []
+        with torch.no_grad():
+            for batch in batches:
+                x = F.interpolate(batch.float().to(device) / 255.0,
+                                  size=(299, 299), mode='bilinear', align_corners=False)
+                x = (x - 0.5) / 0.5
+                feats.append(inception(x).cpu().float())
+        return torch.cat(feats).numpy()
+
+    real_feats = extract_features(real_batches)
+    fake_feats = extract_features(fake_batches)
+
+    # Fréchet distance: mean + covariance + matrix sqrt — fast on CPU, fine with float64
+    mu_r, sig_r = real_feats.mean(0), np.cov(real_feats, rowvar=False)
+    mu_f, sig_f = fake_feats.mean(0), np.cov(fake_feats, rowvar=False)
+    diff = mu_r - mu_f
+    covmean, _ = linalg.sqrtm(sig_r @ sig_f, disp=False)
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    score = float(diff @ diff + np.trace(sig_r + sig_f - 2 * covmean))
+
+    # Restore generative model to its original device
+    if device.type == "cuda":
+        model.to(device)
+
+    elapsed = time.perf_counter() - t0
+    return score, elapsed
+
+
 def main():
     # Detect Mac GPU (MPS)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
@@ -152,7 +225,7 @@ def main():
     # Settings
     IMG_SIZE = 32
     BATCH_SIZE = 64
-    EPOCHS = 10
+    EPOCHS = 100
 
     # Extract CIFAR-10 into individual image files, then load with ImageFolder
     cifar_dir = extract_cifar_to_files()
@@ -173,7 +246,7 @@ def main():
 
     # Training
     for epoch in range(EPOCHS):
-        pbar = tqdm(loader)
+        pbar = tqdm(loader, file=sys.stdout)
         for images, _ in pbar:
             images = images.to(device)
             optimizer.zero_grad()
@@ -185,7 +258,10 @@ def main():
         # Save each generated sample as its own file
         samples = model.sample(n_samples=16, size=IMG_SIZE)
         save_samples_individually(samples, epoch)
-        print(f"Epoch {epoch}: saved 16 individual samples to ./samples/")
+
+        # Compute FID
+        fid_score, fid_time = compute_fid(model, loader, device, n_samples=1000, img_size=IMG_SIZE)
+        print(f"Epoch {epoch}: saved 16 samples to ./samples/ | FID: {fid_score:.2f} (computed in {fid_time:.1f}s)")
 
 if __name__ == "__main__":
     main()

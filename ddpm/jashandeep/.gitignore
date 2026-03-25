@@ -1,0 +1,15 @@
+# Ignore raw datasets
+data/
+
+# Ignore specific checkpoint directories
+ddpm/jashandeep/checkpoints_FMNIST/
+ddpm/jashandeep/checkpoints_MNIST/
+
+# CATCH-ALL: Ignore any model weights no matter where they are saved
+*.pth
+*.pt
+*.ckpt
+
+# Ignore Python cache files (keeps your repo looking clean)
+__pycache__/
+*.pyc

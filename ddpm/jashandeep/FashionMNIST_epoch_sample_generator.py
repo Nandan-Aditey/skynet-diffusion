@@ -1,9 +1,10 @@
+import os
+import glob
+import torch
 import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 
 class DiffusionForwardProcess(nn.Module):
     def __init__(self, num_time_steps=1000, beta_start=1e-4, beta_end=0.02):
@@ -87,9 +88,13 @@ transform = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,))
 ])
 
+fashion_ds = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
+fashion_dl = DataLoader(fashion_ds, batch_size=64, shuffle=True) # Batch size 64 is safe for 6GB VRAM
+
 class TimeEmbedding(nn.Module):
     def __init__(self, n_out:int, t_emb_dim:int = 128):
         super().__init__()
+        # A simple mini-network to process the time barcode
         self.te_block = nn.Sequential(
             nn.SiLU(),
             nn.Linear(t_emb_dim, n_out)
@@ -101,6 +106,7 @@ class TimeEmbedding(nn.Module):
 class NormActConv(nn.Module):
     def __init__(self, in_channels:int, out_channels:int, num_groups:int = 8, kernel_size: int = 3):
         super().__init__()
+        # GroupNorm is highly recommended for Diffusion models instead of BatchNorm
         self.g_norm = nn.GroupNorm(num_groups, in_channels)
         self.act = nn.SiLU()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=(kernel_size - 1)//2)
@@ -111,7 +117,7 @@ class NormActConv(nn.Module):
         x = self.conv(x)
         return x
 
-#Time Embedding
+# 1. The Time Embedding Generator (The Mathematical Clock)
 def get_time_embedding(time_steps: torch.Tensor, t_emb_dim: int) -> torch.Tensor:
     """Transforms a time integer into a 128-dimensional barcode."""
     assert t_emb_dim % 2 == 0, "time embedding must be divisible by 2."
@@ -124,7 +130,7 @@ def get_time_embedding(time_steps: torch.Tensor, t_emb_dim: int) -> torch.Tensor
     t_emb = torch.cat([torch.sin(t_emb), torch.cos(t_emb)], dim=1)
     return t_emb
 
-#Self-Attention Block
+# 2. Self-Attention Block (Helps the U-Net look at the whole image at once)
 class SelfAttentionBlock(nn.Module):
     def __init__(self, channels: int, num_groups: int = 8, num_heads: int = 4):
         super().__init__()
@@ -133,29 +139,35 @@ class SelfAttentionBlock(nn.Module):
         
     def forward(self, x):
         batch_size, channels, h, w = x.shape
+        # Flatten the image into a sequence of pixels for the attention mechanism
         x_flat = x.reshape(batch_size, channels, h * w).transpose(1, 2)
         x_norm = self.g_norm(x).reshape(batch_size, channels, h * w).transpose(1, 2)
+        
+        # Self-Attention calculates relationships between all pixels
         attn_out, _ = self.attn(x_norm, x_norm, x_norm)
+        
+        # Add the attention output back to the original image (Skip Connection)
         out = x_flat + attn_out
         return out.transpose(1, 2).reshape(batch_size, channels, h, w)
 
-#Downward Block
+# 3. Downward Block (Shrink image, inject time)
 class DownC(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, t_emb_dim: int):
         super().__init__()
         self.cv1 = NormActConv(in_channels, out_channels)
         self.cv2 = NormActConv(out_channels, out_channels)
         self.t_emb_layers = TimeEmbedding(out_channels, t_emb_dim)
+        # nn.MaxPool2d cuts the image height/width exactly in half
         self.downsample = nn.MaxPool2d(kernel_size=2, stride=2) 
         
     def forward(self, x, t):
-        x = self.cv1(x) #1x32x32 input
-        # Inject the time barcode
+        x = self.cv1(x)
+        # Inject the time barcode by adding it to the image channels!
         x = x + self.t_emb_layers(t)[:, :, None, None] 
-        x = self.cv2(x) 
+        x = self.cv2(x)
         return self.downsample(x)
 
-#Middle Block
+# 4. Middle Block (Deepest thinking, inject time, use attention)
 class MidC(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, t_emb_dim: int):
         super().__init__()
@@ -171,7 +183,7 @@ class MidC(nn.Module):
         x = self.cv2(x)
         return x
 
-#Upward Block
+# 5. Upward Block (Expand image, glue skip connections, inject time)
 class UpC(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, t_emb_dim: int):
         super().__init__()
@@ -185,18 +197,20 @@ class UpC(nn.Module):
         
     def forward(self, x, skip_x, t):
         x = self.upsample(x)
-        x = torch.cat([x, skip_x], dim=1)
+        x = torch.cat([x, skip_x], dim=1) # Glue them together
         
         x = self.cv1(x)
-        x = x + self.t_emb_layers(t)[:, :, None, None]
+        x = x + self.t_emb_layers(t)[:, :, None, None] # Inject time
         x = self.cv2(x)
         return x
         
     def forward(self, x, skip_x, t):
         x = self.upsample(x)
-        x = torch.cat([x, skip_x], dim=1)     
+        # Glue the saved high-res details (skip_x) to the current image
+        x = torch.cat([x, skip_x], dim=1) 
+        
         x = self.cv1(x)
-        x = x + self.t_emb_layers(t)[:, :, None, None]
+        x = x + self.t_emb_layers(t)[:, :, None, None] # Inject time
         x = self.cv2(x)
         return x
        
@@ -206,177 +220,116 @@ class Unet(nn.Module):
         self.im_channels = im_channels
         self.t_emb_dim = t_emb_dim
         
-        #Base network to process the time barcode
+        # 1. Base network to process the time barcode
         self.t_proj = nn.Sequential(
             nn.Linear(t_emb_dim, t_emb_dim),
             nn.SiLU(),
             nn.Linear(t_emb_dim, t_emb_dim)
-        )     
-        #Initial Image Scan
-        self.cv1 = nn.Conv2d(im_channels, 32, kernel_size=3, padding=1)   
-        #Shrinking the image, increasing channels
+        )
+        
+        # 2. Initial Image Scan
+        self.cv1 = nn.Conv2d(im_channels, 32, kernel_size=3, padding=1)
+        
+        # 3. The Downward Path (Shrinking the image, increasing channels)
+        # (Assuming DownC, MidC, and UpC are defined as in the Kaggle notebook)
         self.downs = nn.ModuleList([
             DownC(32, 64, t_emb_dim),
             DownC(64, 128, t_emb_dim),
             DownC(128, 256, t_emb_dim)
         ])
         
+        # 4. The Bottleneck (Deepest thinking, smallest resolution)
         self.mids = nn.ModuleList([
             MidC(256, 256, t_emb_dim),
             MidC(256, 256, t_emb_dim)
         ])
-    
+        
+        # 5. The Upward Path (Expanding back to original size)
         self.ups = nn.ModuleList([
             UpC(256, 128, t_emb_dim),
             UpC(128, 64, t_emb_dim),
             UpC(64, 32, t_emb_dim)
         ])
-
+        
+        # 6. Final Output Generation (Compressing back to 1 grayscale channel)
         self.cv2 = nn.Sequential(
             nn.GroupNorm(8, 32),
             nn.Conv2d(32, im_channels, kernel_size=3, padding=1)
         )
 
     def forward(self, x, t):
+        # Scan initial image
         out = self.cv1(x)
-
+        
+        # Generate the Time Barcode
         t_emb = get_time_embedding(t, self.t_emb_dim)
         t_emb = self.t_proj(t_emb)
         
+        # Go DOWN the U
         down_outs = []
         for down in self.downs:
-            down_outs.append(out)
-            out = down(out, t_emb) 
+            down_outs.append(out)     # Save a copy for the skip connection!
+            out = down(out, t_emb)    # Pass image + time barcode
             
+        # Go through the MIDDLE
         for mid in self.mids:
             out = mid(out, t_emb)
             
+        # Go UP the U
         for up in self.ups:
-            down_out = down_outs.pop()
-            out = up(out, down_out, t_emb)
+            down_out = down_outs.pop()     # Grab the saved copy
+            out = up(out, down_out, t_emb) # Glue them together + time barcode
             
         # Output the predicted noise
         out = self.cv2(out)
         return out
-    
-def train():
-    batch_size = 64     #Safe for 6GB VRAM
-    num_epochs = 5
-    lr = 1e-4         
-    num_timesteps = 1000
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Firing up the engines on: {device}')
+# 1. Initialize your empty UNet model and Diffusion pipeline here
+from torchvision.utils import save_image
 
-    transform = transforms.Compose([
-        transforms.Resize((32, 32)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-    dataset = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+# 1. Setup Device and Hyperparameters
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+channels = 1 # FashionMNIST is grayscale, so 1 channel
+num_steps = 1000
 
-    model = Unet(im_channels=1, t_emb_dim=128).to(device)
-    forward_process = DiffusionForwardProcess(num_time_steps=num_timesteps).to(device)
+# 2. Initialize the Model and the Reverse Process
+model = Unet(im_channels=channels, t_emb_dim=128).to(device)
+reverse_process = DiffusionReverseProcess(num_time_steps=num_steps).to(device)
+
+# 3. Get a sorted list of all your epoch checkpoints
+checkpoint_files = glob.glob("fashion_unet_epoch_*.pth")
+checkpoint_files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0])) 
+
+if os.path.exists("fashion_unet_final.pth"):
+    checkpoint_files.append("fashion_unet_final.pth")
+
+# 4. Loop through each checkpoint and generate
+for ckpt_path in checkpoint_files:
+    print(f"Loading weights from {ckpt_path}...")
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
-
-    for epoch in range(num_epochs):
-        model.train()
-        epoch_losses = []
-        
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}") #cool progress bar
-        
-        for imgs, _ in pbar:
-            imgs = imgs.to(device)
-            
-            # Step A: Generate random target noise and random time-steps
-            actual_noise = torch.randn_like(imgs).to(device)
-            t = torch.randint(0, num_timesteps, (imgs.shape[0],)).to(device)
-            
-            # Step B: Corrupt the images with the math we built
-            noisy_imgs = forward_process.add_noise(imgs, actual_noise, t)
-            
-            # Step C: The U-Net makes its guess
-            optimizer.zero_grad() # Clear old math
-            predicted_noise = model(noisy_imgs, t)
-            
-            # Step D: See how wrong the U-Net was
-            loss = criterion(predicted_noise, actual_noise)
-            
-            # Step E: Backpropagation (Learn from the mistake)
-            loss.backward()
-            optimizer.step()
-            
-            # Update progress bar with current loss
-            epoch_losses.append(loss.item())
-            pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
-            
-        # End of Epoch summary
-        avg_loss = sum(epoch_losses) / len(epoch_losses)
-        print(f"End of Epoch {epoch+1} | Average Loss: {avg_loss:.4f}\n")
-
-        if (epoch + 1) % 5 == 0:
-            checkpoint_name = f"fashion_mnist_unet_epoch_{epoch+1}.pth"
-            torch.save(model.state_dict(), checkpoint_name)
-            print(f"Checkpoint saved: {checkpoint_name}\n")
-        else:
-            # Just print a normal newline for spacing
-            print() 
-
-    # 6. Save the final brain!
-    torch.save(model.state_dict(), "fashion_mnist_unet_final.pth")
-    print("Training Complete! Final model saved.")
-train()
-
-def generate_images(num_images=16):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Generating on: {device}')
+    # Load the weights
+    state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
+    model.load_state_dict(state_dict)
+    model.eval() 
     
-    num_timesteps = 1000
-    img_size = 32
-    channels = 1
-    
-    model = Unet(im_channels=channels, t_emb_dim=128).to(device)
-    model.load_state_dict(torch.load("mnist_unet_final.pth", map_location=device))
-    model.eval() # Tell the model it's in "testing" mode, not training
-    
-    # 3. Initialize the Reverse Math Process
-    reverse_process = DiffusionReverseProcess(num_time_steps=num_timesteps).to(device)
-    
-    print("Starting generation...")
-
     with torch.no_grad():
-        x = torch.randn(num_images, channels, img_size, img_size).to(device)
+        # A. Start with pure Gaussian noise (let's generate a batch of 16 images)
+        batch_size = 16
+        xt = torch.randn(batch_size, channels, 32, 32).to(device)
         
-        # Step B: Loop backwards from t=999 down to t=0
-        for i in reversed(range(num_timesteps)):
-            # Create a tensor of the current time step for the whole batch
-            t = torch.full((num_images,), i, dtype=torch.long, device=device)
+        # B. Gradually denoise the image (from t=999 down to t=0)
+        for i in reversed(range(num_steps)):
+            t = torch.full((batch_size,), i, dtype=torch.long, device=device)
             
-            # Ask the U-Net to guess the noise
-            predicted_noise = model(x, t)
+            # The UNet predicts the noise added at this time step
+            noise_pred = model(xt, t)
             
-            # Use our reverse math to subtract the noise and step backwards
-            x, _ = reverse_process.sample_prev_timestep(x, predicted_noise, t)
+            # Step backwards using your Reverse Process math
+            xt, _ = reverse_process.sample_prev_timestep(xt, noise_pred, t)
             
-            # Print a little progress update so we know it hasn't crashed
-            if i % 100 == 0:
-                print(f"Step {i} complete...")
-                
-    print("Generation complete! Plotting...")
-    x = x.cpu()
-    x = (x + 1.0) / 2.0 
-    x = torch.clamp(x, 0.0, 1.0)
-    
-    # Create a 4x4 grid to show the 16 images
-    fig, axes = plt.subplots(4, 4, figsize=(8, 8))
-    for i, ax in enumerate(axes.flatten()):
-        ax.imshow(x[i].squeeze(), cmap='gray')
-        ax.axis('off')
+        # C. Denormalize images from [-1, 1] back to [0, 1] so they save correctly
+        final_images = (xt.clamp(-1, 1) + 1.0) / 2.0
         
-    plt.tight_layout()
-    plt.show()
-    
-generate_images()
+        # D. Save the 16 images as a 4x4 grid
+        save_name = f"sample_{os.path.basename(ckpt_path).replace('.pth', '.png')}"
+        save_image(final_images, save_name, nrow=4)
+        print(f"Saved {save_name}\n")

@@ -318,7 +318,7 @@ def train():
         print(f"End of Epoch {epoch+1} | Average Loss: {avg_loss:.4f}\n")
 
         if (epoch + 1) % 5 == 0:
-            checkpoint_name = f"fashion_mnist_unet_epoch_{epoch+1}.pth"
+            checkpoint_name = f"./ddpm/jashandeep/checkpoints_FMNIST/fashion_mnist_unet_epoch_{epoch+1}.pth"
             torch.save(model.state_dict(), checkpoint_name)
             print(f"Checkpoint saved: {checkpoint_name}\n")
         else:
@@ -328,7 +328,7 @@ def train():
     # 6. Save the final brain!
     torch.save(model.state_dict(), "fashion_mnist_unet_final.pth")
     print("Training Complete! Final model saved.")
-train()
+#train()
 
 def generate_images(num_images=16):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -339,7 +339,7 @@ def generate_images(num_images=16):
     channels = 1
     
     model = Unet(im_channels=channels, t_emb_dim=128).to(device)
-    model.load_state_dict(torch.load("mnist_unet_final.pth", map_location=device))
+    model.load_state_dict(torch.load("./ddpm/jashandeep/checkpoints_MNIST/mnist_unet_final.pth", map_location=device))
     model.eval() # Tell the model it's in "testing" mode, not training
     
     # 3. Initialize the Reverse Math Process

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-
+from torchvision.utils import save_image
 class DiffusionForwardProcess(nn.Module):
     def __init__(self, num_time_steps=1000, beta_start=1e-4, beta_end=0.02):
         super().__init__()
@@ -283,8 +283,6 @@ class Unet(nn.Module):
         # Output the predicted noise
         out = self.cv2(out)
         return out
-# 1. Initialize your empty UNet model and Diffusion pipeline here
-from torchvision.utils import save_image
 
 # 1. Setup Device and Hyperparameters
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -296,17 +294,16 @@ model = Unet(im_channels=channels, t_emb_dim=128).to(device)
 reverse_process = DiffusionReverseProcess(num_time_steps=num_steps).to(device)
 
 # 3. Get a sorted list of all your epoch checkpoints
-checkpoint_files = glob.glob("fashion_unet_epoch_*.pth")
+checkpoint_files = glob.glob("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_epoch_*.pth")
 checkpoint_files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0])) 
 
-if os.path.exists("fashion_unet_final.pth"):
-    checkpoint_files.append("fashion_unet_final.pth")
+if os.path.exists("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_final.pth"):
+    checkpoint_files.append("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_final.pth")
 
 # 4. Loop through each checkpoint and generate
 for ckpt_path in checkpoint_files:
     print(f"Loading weights from {ckpt_path}...")
     
-    # Load the weights
     state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     model.eval() 

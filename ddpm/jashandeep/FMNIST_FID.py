@@ -117,7 +117,6 @@ class NormActConv(nn.Module):
 
 # 1. The Time Embedding Generator (The Mathematical Clock)
 def get_time_embedding(time_steps: torch.Tensor, t_emb_dim: int) -> torch.Tensor:
-    """Transforms a time integer into a 128-dimensional barcode."""
     assert t_emb_dim % 2 == 0, "time embedding must be divisible by 2."
     
     factor = 2 * torch.arange(start=0, end=t_emb_dim//2, dtype=torch.float32, device=time_steps.device) / t_emb_dim
@@ -216,66 +215,54 @@ class Unet(nn.Module):
             nn.Linear(t_emb_dim, t_emb_dim)
         )
         
-        # 2. Initial Image Scan
         self.cv1 = nn.Conv2d(im_channels, 32, kernel_size=3, padding=1)
         
-        # 3. The Downward Path (Shrinking the image, increasing channels)
-        # (Assuming DownC, MidC, and UpC are defined as in the Kaggle notebook)
         self.downs = nn.ModuleList([
             DownC(32, 64, t_emb_dim),
             DownC(64, 128, t_emb_dim),
             DownC(128, 256, t_emb_dim)
         ])
         
-        # 4. The Bottleneck (Deepest thinking, smallest resolution)
         self.mids = nn.ModuleList([
             MidC(256, 256, t_emb_dim),
             MidC(256, 256, t_emb_dim)
         ])
         
-        # 5. The Upward Path (Expanding back to original size)
         self.ups = nn.ModuleList([
             UpC(256, 128, t_emb_dim),
             UpC(128, 64, t_emb_dim),
             UpC(64, 32, t_emb_dim)
         ])
         
-        # 6. Final Output Generation (Compressing back to 1 grayscale channel)
         self.cv2 = nn.Sequential(
             nn.GroupNorm(8, 32),
             nn.Conv2d(32, im_channels, kernel_size=3, padding=1)
         )
 
     def forward(self, x, t):
-        # Scan initial image
         out = self.cv1(x)
         
         # Generate the Time Barcode
         t_emb = get_time_embedding(t, self.t_emb_dim)
         t_emb = self.t_proj(t_emb)
         
-        # Go DOWN the U
         down_outs = []
         for down in self.downs:
-            down_outs.append(out)     # Save a copy for the skip connection!
-            out = down(out, t_emb)    # Pass image + time barcode
+            down_outs.append(out)
+            out = down(out, t_emb)   
             
-        # Go through the MIDDLE
         for mid in self.mids:
             out = mid(out, t_emb)
             
-        # Go UP the U
         for up in self.ups:
-            down_out = down_outs.pop()     # Grab the saved copy
-            out = up(out, down_out, t_emb) # Glue them together + time barcode
+            down_out = down_outs.pop()     
+            out = up(out, down_out, t_emb)
             
-        # Output the predicted noise
         out = self.cv2(out)
         return out
 
-# 1. Setup Device and Hyperparameters
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-channels = 1 # FashionMNIST is grayscale, so 1 channel
+channels = 1
 num_steps = 1000
 
 fashion_ds = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
@@ -312,13 +299,13 @@ fid.update(real_images_bytes, real=True)
 model = Unet(im_channels=channels, t_emb_dim=128).to(device)
 reverse_process = DiffusionReverseProcess(num_time_steps=num_steps).to(device)
 
-checkpoint_files = glob.glob("fashion_unet_epoch_*.pth")
+checkpoint_files = glob.glob("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_epoch_*.pth")
 checkpoint_files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
 # FILTER: Keep only every 2th checkpoint
 checkpoint_files = checkpoint_files[::2] 
 
-if os.path.exists("fashion_unet_final.pth"):
-    checkpoint_files.append("fashion_unet_final.pth")
+if os.path.exists("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_final.pth"):
+    checkpoint_files.append("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_final.pth")
 
 fid_scores = {}
 

@@ -23,60 +23,46 @@ class DiffusionForwardProcess(nn.Module):
         return (sqrt_alpha_bar_t * original) + (sqrt_one_minus_alpha_bar_t * noise)  #x_t
 
 
-class DiffusionReverseProcess(nn.Module):
+class DDIMReverseProcess(nn.Module):
     def __init__(self, num_time_steps=1000, beta_start=1e-4, beta_end=0.02):
         super().__init__()
-        
+        # The base math is exactly the same!
         betas = torch.linspace(beta_start, beta_end, num_time_steps)
         alphas = 1 - betas
         alpha_bars = torch.cumprod(alphas, dim=0)
         
-        #adding aplha_bar_0=1.0
-        alpha_bars_prev = torch.cat([torch.tensor([1.0]), alpha_bars[:-1]])
-
-        sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
-        sqrt_alpha_bars = torch.sqrt(alpha_bars)
-        sqrt_one_minus_alpha_bars = torch.sqrt(1.0 - alpha_bars)
-        
-        mean_coef = betas / sqrt_one_minus_alpha_bars
-        
-        #variance: beta_t * (1 - alpha_bar_{t-1}) / (1 - alpha_bar_t)
-        posterior_variance = betas * (1.0 - alpha_bars_prev) / (1.0 - alpha_bars)
-
-        self.register_buffer('betas', betas)
+        # We only need alpha_bars for DDIM
         self.register_buffer('alpha_bars', alpha_bars)
-        self.register_buffer('sqrt_recip_alphas', sqrt_recip_alphas)
-        self.register_buffer('sqrt_alpha_bars', sqrt_alpha_bars)
-        self.register_buffer('sqrt_one_minus_alpha_bars', sqrt_one_minus_alpha_bars)
-        self.register_buffer('mean_coef', mean_coef)
-        self.register_buffer('posterior_variance', posterior_variance)
 
     def _extract(self, a, t, x_shape):
-        """Helper to get the right time-step value and reshape it for images"""
         batch_size = t.shape[0]
         out = a.gather(-1, t)
         return out.reshape(batch_size, 1, 1, 1).to(t.device)
 
-    def sample_prev_timestep(self, xt, noise_pred, t):
-        #just extracting data and making sure the dimensions are okay
-        sqrt_recip_alphas_t = self._extract(self.sqrt_recip_alphas, t, xt.shape)
-        mean_coef_t = self._extract(self.mean_coef, t, xt.shape)
-        posterior_variance_t = self._extract(self.posterior_variance, t, xt.shape)
+    def step(self, xt, noise_pred, t, t_prev):
+        """
+        Takes a massive leap backward from step 't' to step 't_prev'
+        """
+        # 1. Get alpha bars for current and previous step
+        alpha_bar_t = self._extract(self.alpha_bars, t, xt.shape)
         
-        sqrt_alpha_bars_t = self._extract(self.sqrt_alpha_bars, t, xt.shape)
-        sqrt_one_minus_alpha_bars_t = self._extract(self.sqrt_one_minus_alpha_bars, t, xt.shape)
-        
-        mean = sqrt_recip_alphas_t * (xt - mean_coef_t * noise_pred)
-        
-        x0 = (xt - sqrt_one_minus_alpha_bars_t * noise_pred) / sqrt_alpha_bars_t
-        x0 = torch.clamp(x0, -1., 1.)
-
-        if t[0] == 0:
-            return mean, x0
+        # If t_prev is negative (we stepped past 0), the noise level is 1.0 (perfectly clean)
+        if t_prev[0] < 0:
+            alpha_bar_t_prev = torch.ones_like(alpha_bar_t) 
         else:
-            noise = torch.randn_like(xt)
-            sigma = torch.sqrt(posterior_variance_t)
-            return mean + sigma * noise, x0
+            alpha_bar_t_prev = self._extract(self.alpha_bars, t_prev, xt.shape)
+
+        # 2. Predict the perfectly clean original image (x0)
+        x0_pred = (xt - torch.sqrt(1 - alpha_bar_t) * noise_pred) / torch.sqrt(alpha_bar_t)
+        #x0_pred = torch.clamp(x0_pred, -1., 1.) # Keep colors from exploding
+
+        # 3. Calculate the mathematical "direction" pointing to the previous step
+        dir_xt = torch.sqrt(1 - alpha_bar_t_prev) * noise_pred
+
+        # 4. Deterministically jump to the previous step! (Zero random noise added)
+        x_prev = torch.sqrt(alpha_bar_t_prev) * x0_pred + dir_xt
+
+        return x_prev
         
 #keep track of loss fn vs time, if n points, atleast have 4n patametres
 
@@ -150,7 +136,6 @@ class DownC(nn.Module):
         
     def forward(self, x, t):
         x = self.cv1(x) #1x32x32 input
-        # Inject the time barcode
         x = x + self.t_emb_layers(t)[:, :, None, None] 
         x = self.cv2(x) 
         return self.downsample(x)
@@ -167,7 +152,7 @@ class MidC(nn.Module):
     def forward(self, x, t):
         x = self.cv1(x)
         x = x + self.t_emb_layers(t)[:, :, None, None] # Inject time
-        x = self.attn(x) # Look at global context
+        x = self.attn(x)
         x = self.cv2(x)
         return x
 
@@ -177,7 +162,6 @@ class UpC(nn.Module):
         super().__init__()
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         
-        # THE FIX: Input channels from below + Skip channels from across!
         self.cv1 = NormActConv(in_channels + out_channels, out_channels)
         
         self.cv2 = NormActConv(out_channels, out_channels)
@@ -206,15 +190,12 @@ class Unet(nn.Module):
         self.im_channels = im_channels
         self.t_emb_dim = t_emb_dim
         
-        #Base network to process the time barcode
         self.t_proj = nn.Sequential(
             nn.Linear(t_emb_dim, t_emb_dim),
             nn.SiLU(),
             nn.Linear(t_emb_dim, t_emb_dim)
         )     
-        #Initial Image Scan
         self.cv1 = nn.Conv2d(im_channels, 32, kernel_size=3, padding=1)   
-        #Shrinking the image, increasing channels
         self.downs = nn.ModuleList([
             DownC(32, 64, t_emb_dim),
             DownC(64, 128, t_emb_dim),
@@ -255,138 +236,53 @@ class Unet(nn.Module):
             down_out = down_outs.pop()
             out = up(out, down_out, t_emb)
             
-        # Output the predicted noise
         out = self.cv2(out)
         return out
     
-def train():
-    batch_size = 64     #Safe for 6GB VRAM
-    num_epochs = 10
-    lr = 1e-4         
-    num_timesteps = 1000
-    
+def generate_images_ddim(num_images=16, ddim_steps=50):
+    # 1. Setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Firing up the engines on: {device}')
-
-    transform = transforms.Compose([
-        transforms.Resize((32, 32)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-    dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    model = Unet(im_channels=1, t_emb_dim=128).to(device)
-    forward_process = DiffusionForwardProcess(num_time_steps=num_timesteps).to(device)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
-
-    #==============RESUME BLOCK=================
-    resume_training = True               # Change to False to start from scratch!
-    start_epoch = 0                      # Keeps our print statements accurate
-    checkpoint_path = "./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_epoch_100.pth" # Which brain to load
-
-    if resume_training:
-        import os
-        if os.path.exists(checkpoint_path):
-            model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
-            print(f"Successfully loaded checkpoint: {checkpoint_path}")
-            
-            start_epoch = int(checkpoint_path.split('_')[-1].split('.')[0])
-            print(f"Resuming training from Epoch {start_epoch + 1}...")
-        else:
-            print(f"Could not find {checkpoint_path}. Starting from scratch!")
-
-    for epoch in range(start_epoch, start_epoch + num_epochs):
-        model.train()
-        epoch_losses = []
-        
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}") #cool progress bar
-        
-        for imgs, _ in pbar:
-            imgs = imgs.to(device)
-            
-            # Step A: Generate random target noise and random time-steps
-            actual_noise = torch.randn_like(imgs).to(device)
-            t = torch.randint(0, num_timesteps, (imgs.shape[0],)).to(device)
-            
-            # Step B: Corrupt the images with the math we built
-            noisy_imgs = forward_process.add_noise(imgs, actual_noise, t)
-            
-            # Step C: The U-Net makes its guess
-            optimizer.zero_grad() # Clear old math
-            predicted_noise = model(noisy_imgs, t)
-            
-            # Step D: See how wrong the U-Net was
-            loss = criterion(predicted_noise, actual_noise)
-            
-            # Step E: Backpropagation (Learn from the mistake)
-            loss.backward()
-            optimizer.step()
-            
-            # Update progress bar with current loss
-            epoch_losses.append(loss.item())
-            pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
-            
-        # End of Epoch summary
-        avg_loss = sum(epoch_losses) / len(epoch_losses)
-        print(f"End of Epoch {epoch+1} | Average Loss: {avg_loss:.4f}\n")
-
-        if (epoch + 1) % 5 == 0:
-            checkpoint_name = f"./ddpm/jashandeep/checkpoints_MNIST/monster_unet_epoch_{epoch+1}.pth"
-            torch.save(model.state_dict(), checkpoint_name)
-            print(f"Checkpoint saved: {checkpoint_name}\n")
-        else:
-            # Just print a normal newline for spacing
-            print() 
-
-    # 6. Save the final brain!
-    torch.save(model.state_dict(), "monster.pth")
-    print("Training Complete! Final model saved.")
-#train()
-
-def generate_images(num_images=16):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Generating on: {device}')
+    print(f'Generating on: {device} using DDIM!')
     
     num_timesteps = 1000
     img_size = 32
     channels = 1
-    
     model = Unet(im_channels=channels, t_emb_dim=128).to(device)
-    model.load_state_dict(torch.load("./ddpm/jashandeep/checkpoints_MNIST/monster_unet_epoch_105.pth", map_location=device))
-    model.eval() # Tell the model it's in "testing" mode, not training
+    model.load_state_dict(torch.load("./ddpm/jashandeep/checkpoints_MNIST/monster_unet_epoch_105.pth", map_location=device, weights_only=True))
+    model.eval() 
     
-    # 3. Initialize the Reverse Math Process
-    reverse_process = DiffusionReverseProcess(num_time_steps=num_timesteps).to(device)
+    reverse_process = DDIMReverseProcess(num_time_steps=num_timesteps).to(device)
     
-    print("Starting generation...")
-
+    # Calculate the jump sizes (e.g., 1000 steps // 50 jumps = jump by 20 every loop)
+    step_size = num_timesteps // ddim_steps
+    time_steps = list(range(num_timesteps - 1, -1, -step_size))
+    
+    print(f"Starting generation in {ddim_steps} steps...")
+    
     with torch.no_grad():
         x = torch.randn(num_images, channels, img_size, img_size).to(device)
         
-        # Step B: Loop backwards from t=999 down to t=0
-        for i in reversed(range(num_timesteps)):
-            # Create a tensor of the current time step for the whole batch
-            t = torch.full((num_images,), i, dtype=torch.long, device=device)
+        for i, current_t in enumerate(time_steps):
             
-            # Ask the U-Net to guess the noise
+            t = torch.full((num_images,), current_t, dtype=torch.long, device=device)
+        
+            if i == len(time_steps) - 1:
+                next_t = -1 # If we are on the last loop, jump to -1 (perfectly clean)
+            else:
+                next_t = time_steps[i + 1]
+                
+            t_prev = torch.full((num_images,), next_t, dtype=torch.long, device=device)
             predicted_noise = model(x, t)
+            x = reverse_process.step(x, predicted_noise, t, t_prev)
             
-            # Use our reverse math to subtract the noise and step backwards
-            x, _ = reverse_process.sample_prev_timestep(x, predicted_noise, t)
-            
-            # Print a little progress update so we know it hasn't crashed
-            if i % 100 == 0:
-                print(f"Step {i} complete...")
+            if (i + 1) % 10 == 0:
+                print(f"Completed DDIM jump {i + 1}/{ddim_steps}...")
                 
     print("Generation complete! Plotting...")
     x = x.cpu()
     x = (x + 1.0) / 2.0 
     x = torch.clamp(x, 0.0, 1.0)
     
-    # Create a 4x4 grid to show the 16 images
     fig, axes = plt.subplots(4, 4, figsize=(8, 8))
     for i, ax in enumerate(axes.flatten()):
         ax.imshow(x[i].squeeze(), cmap='gray')
@@ -395,4 +291,4 @@ def generate_images(num_images=16):
     plt.tight_layout()
     plt.show()
     
-generate_images()
+generate_images_ddim()

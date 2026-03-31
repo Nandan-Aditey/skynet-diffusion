@@ -6,13 +6,6 @@ import matplotlib.pyplot as plt
 from diffusion import DiffusionReverseProcess
 from unet import Unet
 
-# 32x32 is much better for U-Nets than 28x28 apparently?
-transform = transforms.Compose([
-    transforms.Resize((32, 32)), 
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
-])
-
 def generate_images(num_images=16):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Generating on: {device}')

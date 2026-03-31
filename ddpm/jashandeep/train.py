@@ -7,13 +7,6 @@ from tqdm import tqdm
 from diffusion import DiffusionForwardProcess
 from unet import Unet
 
-# 32x32 is much better for U-Nets than 28x28 apparently?
-transform = transforms.Compose([
-    transforms.Resize((32, 32)), 
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
-])
-
 def train():
     batch_size = 64     #Safe for 6GB VRAM
     num_epochs = 10
@@ -23,6 +16,7 @@ def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Firing up the engines on: {device}')
 
+    # 32x32 is much better for U-Nets than 28x28 apparently?
     transform = transforms.Compose([
         transforms.Resize((32, 32)),
         transforms.ToTensor(),
@@ -80,11 +74,9 @@ def train():
             loss.backward()
             optimizer.step()
             
-            # Update progress bar with current loss
             epoch_losses.append(loss.item())
             pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
             
-        # End of Epoch summary
         avg_loss = sum(epoch_losses) / len(epoch_losses)
         print(f"End of Epoch {epoch+1} | Average Loss: {avg_loss:.4f}\n")
 
@@ -93,10 +85,8 @@ def train():
             torch.save(model.state_dict(), checkpoint_name)
             print(f"Checkpoint saved: {checkpoint_name}\n")
         else:
-            # Just print a normal newline for spacing
             print() 
 
-    # 6. Save the final brain!
-    torch.save(model.state_dict(), "monster.pth")
+    torch.save(model.state_dict(), "./ddpm/jashandeep/checkpoints_MNIST/monster.pth")
     print("Training Complete! Final model saved.")
 train()

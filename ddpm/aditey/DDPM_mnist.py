@@ -206,8 +206,15 @@ class UNET(nn.Module):
         for layer_index in range(self.num_layers//2, self.num_layers):
 
             layer = getattr(self, f'Layer{layer_index + 1}')
-            latent_var = torch.concat((layer(latent_var, embeddings)[0], residuals[self.num_layers - layer_index - 1]), dim = 1)
-        
+            up = layer(latent_var, embeddings)[0]
+            skip = residuals[self.num_layers - layer_index - 1]
+
+            if up.shape[-2:] != skip.shape[-2:]:
+                _, _, h, w = up.shape
+                skip = skip[:, :, :h, :w]
+
+            latent_var = torch.concat((up, skip), dim=1)
+                    
         return self.output_conv(self.relu(self.late_conv(latent_var)))
     
 
@@ -399,7 +406,7 @@ def inference(checkpoint_path: str = "", num_time_steps: int = 1000, ema_decay: 
 
 def main():
 
-    #train(checkpoint_path = 'mnist-checkpoints/ddpm_checkpoint.pth', lr = 2e-5, num_epochs = 75)
+    train(checkpoint_path = 'mnist-checkpoints/ddpm_checkpoint.pth', lr = 2e-5, num_epochs = 75)
     inference('mnist-checkpoints/ddpm_checkpoint.pth')
     
 

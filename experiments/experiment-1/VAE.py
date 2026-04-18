@@ -13,7 +13,6 @@ from torchvision.models import inception_v3, Inception_V3_Weights
 # Ensure Mac GPU fallback for specialized operations
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 
-# --- 1. VAE COMPONENTS ---
 
 class Encoder(nn.Module):
     def __init__(self, in_channels=3, latent_dim=128):
@@ -43,14 +42,14 @@ class Decoder(nn.Module):
         super().__init__()
         self.fc = nn.Linear(latent_dim, 256 * 4 * 4)
         self.net = nn.Sequential(
-            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),  # 4 -> 8
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.ConvTranspose2d(128, 64,  kernel_size=4, stride=2, padding=1),  # 8 -> 16
+            nn.ConvTranspose2d(128, 64,  kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.ConvTranspose2d(64, out_channels, kernel_size=4, stride=2, padding=1),  # 16 -> 32
-            nn.Tanh(),  # output in [-1, 1]
+            nn.ConvTranspose2d(64, out_channels, kernel_size=4, stride=2, padding=1),
+            nn.Tanh(),
         )
 
     def forward(self, z):
@@ -58,7 +57,6 @@ class Decoder(nn.Module):
         return self.net(h)
 
 
-# --- 2. VAE WRAPPER ---
 
 class VAE(nn.Module):
     def __init__(self, in_channels=3, latent_dim=128, device="cpu"):
@@ -84,15 +82,14 @@ class VAE(nn.Module):
         return recon_loss + beta * kl_loss, recon_loss, kl_loss
 
     @torch.no_grad()
-    def sample(self, n_samples, size=None):  # size unused, kept for API parity with DDPM
+    def sample(self, n_samples, size=None):
         self.eval()
         z = torch.randn(n_samples, self.latent_dim, device=self.device)
         imgs = self.decoder(z)
         self.train()
-        return (imgs.clamp(-1, 1) + 1) / 2  # scale to [0, 1]
+        return (imgs.clamp(-1, 1) + 1) / 2
 
 
-# --- 3. SHARED UTILITIES ---
 
 CIFAR10_CLASSES = ['airplane','automobile','bird','cat','deer',
                    'dog','frog','horse','ship','truck']
@@ -142,7 +139,6 @@ def compute_fid(model, loader, device, n_samples=1000, img_size=32):
     from scipy import linalg
     t0 = time.perf_counter()
 
-    # Collect real images on CPU (no GPU needed yet)
     real_batches, real_count = [], 0
     for images, _ in loader:
         real_batches.append(((images.clamp(-1, 1) + 1) / 2 * 255).to(torch.uint8))
@@ -150,22 +146,19 @@ def compute_fid(model, loader, device, n_samples=1000, img_size=32):
         if real_count >= n_samples:
             break
 
-    # Generate fakes while the model is still on its original device
     fake_batches, fake_count = [], 0
     while fake_count < n_samples:
         n = min(64, n_samples - fake_count)
-        samples = model.sample(n_samples=n)  # already in [0, 1]
+        samples = model.sample(n_samples=n)
         fake_batches.append((samples * 255).to(torch.uint8).cpu())
         fake_count += n
 
-    # For CUDA: offload generative model to free VRAM for InceptionV3
     if device.type == "cuda":
         model.cpu()
         torch.cuda.empty_cache()
 
-    # Load InceptionV3 on the accelerator (float32 — works on both CUDA and MPS)
     inception = inception_v3(weights=Inception_V3_Weights.DEFAULT)
-    inception.fc = nn.Identity()  # return 2048-d pool3 features instead of logits
+    inception.fc = nn.Identity()
     inception = inception.to(device).eval()
 
     def extract_features(batches):
@@ -181,7 +174,6 @@ def compute_fid(model, loader, device, n_samples=1000, img_size=32):
     real_feats = extract_features(real_batches)
     fake_feats = extract_features(fake_batches)
 
-    # Fréchet distance: mean + covariance + matrix sqrt — fast on CPU, fine with float64
     mu_r, sig_r = real_feats.mean(0), np.cov(real_feats, rowvar=False)
     mu_f, sig_f = fake_feats.mean(0), np.cov(fake_feats, rowvar=False)
     diff = mu_r - mu_f
@@ -190,7 +182,6 @@ def compute_fid(model, loader, device, n_samples=1000, img_size=32):
         covmean = covmean.real
     score = float(diff @ diff + np.trace(sig_r + sig_f - 2 * covmean))
 
-    # Restore generative model to its original device
     if device.type == "cuda":
         model.to(device)
 
@@ -198,21 +189,17 @@ def compute_fid(model, loader, device, n_samples=1000, img_size=32):
     return score, elapsed
 
 
-# --- 4. MAIN EXECUTION ---
 
 def main():
-    # Detect Mac GPU (MPS)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Settings
     IMG_SIZE   = 32
     BATCH_SIZE = 64
     EPOCHS     = 100
     LATENT_DIM = 128
-    BETA       = 1.0  # KL weight; increase for disentanglement (beta-VAE)
+    BETA       = 1.0
 
-    # Extract CIFAR-10 into individual image files, then load with ImageFolder
     cifar_dir = extract_cifar_to_files()
     transform = transforms.Compose([
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
@@ -223,11 +210,9 @@ def main():
     loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     print(f"Loaded {len(dataset):,} individual images from {cifar_dir}/")
 
-    # Init model
     model     = VAE(latent_dim=LATENT_DIM, device=device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
-    # Training
     for epoch in range(EPOCHS):
         pbar = tqdm(loader, file=sys.stdout)
         for images, _ in pbar:
@@ -241,11 +226,9 @@ def main():
                 f"(recon: {recon_loss.item():.4f}, kl: {kl_loss.item():.4f})"
             )
 
-        # Save samples
         samples = model.sample(n_samples=16)
         save_samples_individually(samples, epoch)
 
-        # Compute FID
         fid_score, fid_time = compute_fid(model, loader, device, n_samples=1000, img_size=IMG_SIZE)
         print(f"Epoch {epoch}: saved 16 samples to ./samples_vae/ | FID: {fid_score:.2f} (computed in {fid_time:.1f}s)")
 

@@ -1,16 +1,15 @@
-import torch                                    #type: ignore
-import torch.nn as nn                           #type: ignore
-import math                                     #type: ignore
-from torchvision import datasets, transforms    #type: ignore
-from torch.utils.data import DataLoader         #type: ignore
-from timm.utils import ModelEmaV3               #type: ignore
-from tqdm import tqdm                           #type: ignore
-import matplotlib.pyplot as plt                 #type: ignore
-import numpy as np                              #type: ignore
-from einops import rearrange                    #type: ignore
-import random                                   #type: ignore
-import os                                       #type: ignore
-            
+import torch                                    
+import torch.nn as nn                           
+import math                                     
+from torchvision import datasets, transforms    
+from torch.utils.data import DataLoader         
+from timm.utils import ModelEmaV3               
+from tqdm import tqdm                           
+import matplotlib.pyplot as plt                 
+import numpy as np                              
+from einops import rearrange                    
+import random                                   
+import os                                       
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -346,7 +345,6 @@ def inference(checkpoint_path: str = "", num_time_steps: int = 1000, ema_decay: 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
     model = UNET().to(device)
-    model = torch.compile(model)
     model.load_state_dict(checkpoint['weights'])
     
     ema = ModelEmaV3(model, decay=ema_decay)

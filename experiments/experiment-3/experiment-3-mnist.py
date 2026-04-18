@@ -470,7 +470,7 @@ if __name__ == "__main__":
     # clip_model = clip_model.to(device)
     # clip_model.eval()
 
-    time_steps = [10, 20, 50, 100, 200, 500, 1000, 1250, 1500, 1750, 2000]
+    time_steps = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
 
     fid_scores = []
     cmmd_scores = []
@@ -503,23 +503,6 @@ if __name__ == "__main__":
     plt.close()
 
 
-    # T_vals = [x[0] for x in cmmd_scores]
-    # cmmd_vals = [x[1] for x in cmmd_scores]
-
-    # plt.figure()
-    # plt.plot(T_vals, cmmd_vals, marker = 'o')
-    # plt.xlabel("Sampling Steps (T)")
-    # plt.ylabel("CMMD Score")
-    # plt.title("CMMD vs Sampling Steps")
-    # plt.grid()
-
-    # plt.savefig("graphs/cmmd_vs_T.png", dpi = 300, bbox_inches = 'tight')
-    # plt.close()
-
-
     print("\nFinal Results:")
     for T, fid in fid_scores:
         print(f"T = {T} | FID = {fid:.4f}")
-
-    # for T, cmmd in cmmd_scores:
-    #     print(f"T = {T} | CMMD = {cmmd:.6f}")

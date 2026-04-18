@@ -1,3 +1,15 @@
+'''
+Experiment-3:
+
+How does the value of T, the number of timesteps, impact:
+• The distribution of the latent variable x_T and the extent to which x_T approaches a
+Gaussian distribution.
+• The image quality, and can we empirically obtain a relation between T and FID scores?
+
+This experiment aims to find answers to the above two questions.
+'''
+
+
 import torch                                                    #type: ignore
 import torch.nn as nn                                           #type: ignore
 from scipy.stats import kstest                                  #type: ignore
@@ -359,7 +371,6 @@ if __name__ == "__main__":
 
     plot_metrics(compiled_list)
 
-    print("Cleaning up memory from Part (a)...")
     if 'sample_points' in locals():
         del sample_points
     if 'compiled_list' in locals():
@@ -373,7 +384,7 @@ if __name__ == "__main__":
     print("Part (b) starting")
  
     model = UNET().to(device)
-    checkpoint = torch.load("cifar-checkpoints/ddpm_checkpoint_cifar_295_epochs", map_location = device)
+    checkpoint = torch.load("cifar-checkpoints/ddpm_checkpoint_cifar", map_location = device)
     model.load_state_dict(checkpoint['weights'])
     
     if 'ema' in checkpoint:
@@ -382,13 +393,13 @@ if __name__ == "__main__":
         model = ema.module
     
     model.eval()
-    scheduler = DDPM_Scheduler(num_time_steps=1000)
+    scheduler = DDPM_Scheduler(num_time_steps = 1000)
 
-    time_steps = [10, 50, 100, 250, 500, 1000]
+    time_steps = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
     fid_scores = []
 
     for num_steps in time_steps:
-        print(f"Computing FID for sampling steps = {num_steps}...", flush=True)
+        print(f"Computing FID for sampling steps = {num_steps}", flush=True)
         fid_score = compute_fid(model, scheduler, dataloader, num_steps, n_samples=5000)
         fid_scores.append((num_steps, fid_score))
         print(f"T = {num_steps} | FID = {fid_score:.4f}", flush=True)

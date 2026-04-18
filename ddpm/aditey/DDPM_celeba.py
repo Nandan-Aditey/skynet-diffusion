@@ -1,17 +1,16 @@
-import torch                                    
-import torch.nn as nn                           
-import math                                     
-from torchvision import datasets, transforms    
-from torch.utils.data import DataLoader         
-from timm.utils import ModelEmaV3               
-from tqdm import tqdm                           
-import matplotlib.pyplot as plt                 
-import numpy as np                              
-from einops import rearrange                    
-import random                                   
-import os                     
-import csv 
-from torch.cuda.amp import autocast, GradScaler                 
+import torch                                    #type: ignore 
+import torch.nn as nn                           #type: ignore 
+import math                                     #type: ignore 
+from torchvision import datasets, transforms    #type: ignore 
+from torch.utils.data import DataLoader         #type: ignore 
+from timm.utils import ModelEmaV3               #type: ignore 
+from tqdm import tqdm                           #type: ignore 
+import matplotlib.pyplot as plt                 #type: ignore 
+import numpy as np                              #type: ignore 
+from einops import rearrange                    #type: ignore 
+import random                                   #type: ignore 
+import os                                       #type: ignore 
+import csv                                      #type: ignore 
 
 if torch.cuda.is_available():
     device = torch.device("cuda")

@@ -1,14 +1,16 @@
-import os
-import sys
-import time
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms, utils
-from tqdm import tqdm
-import numpy as np
-from torchvision.models import inception_v3, Inception_V3_Weights
+import os                                                           #type: ignore 
+import sys                                                          #type: ignore 
+import time                                                         #type: ignore 
+import torch                                                        #type: ignore 
+import torch.nn as nn                                               #type: ignore 
+import torch.nn.functional as F                                     #type: ignore 
+from torch.utils.data import DataLoader                             #type: ignore 
+from torchvision import datasets, transforms, utils                 #type: ignore 
+from tqdm import tqdm                                               #type: ignore 
+import numpy as np                                                  #type: ignore 
+from torchvision.models import inception_v3, Inception_V3_Weights   #type: ignore 
+from torchvision.utils import save_image as _save                   #type: ignore 
+
 
 # Ensure Mac GPU fallback for specialized operations
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
@@ -100,8 +102,8 @@ def extract_cifar_to_files(root="./data/cifar_images"):
         print(f"CIFAR images already extracted to {root}/")
         return root
 
-    print("Extracting CIFAR-10 to individual image files...")
-    from torchvision.utils import save_image as _save
+    print("Extracting CIFAR-10 to individual image files")
+
     raw = datasets.CIFAR10(root="./data", train=True, download=True,
                            transform=transforms.ToTensor())
     for cls in CIFAR10_CLASSES:

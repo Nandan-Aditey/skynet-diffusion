@@ -18,9 +18,7 @@ else:
 
 print(f"Device: {device}")
 
-# ==========================================
-# 1. DIFFUSION MODEL COMPONENTS
-# ==========================================
+
 
 class SinusoidalEmbeddings(torch.nn.Module):
     def __init__(self, time_steps:int, embedding_dimension: int):
@@ -133,9 +131,7 @@ class DDPM_Scheduler(nn.Module):
     def forward(self, t):
         return self.beta[t], self.alpha[t]
 
-# ==========================================
-# 2. NOISY CLASSIFIER (For Guidance)
-# ==========================================
+
 
 class NoisyClassifier(nn.Module):
     """
@@ -174,9 +170,6 @@ class NoisyClassifier(nn.Module):
         x = x.view(x.shape[0], -1)
         return self.fc(x)
 
-# ==========================================
-# 3. HELPER FUNCTIONS (Headless/Remote Safe)
-# ==========================================
 
 def set_seed(seed: int = 42):
     torch.manual_seed(seed)
@@ -223,9 +216,7 @@ def save_reverse_grid(images: list, index: int, save_dir="guided_timesteps"):
     plt.savefig(f"{save_dir}/sample_{index}_grid.png")
     plt.close(fig) # Prevent memory leaks on headless servers
 
-# ==========================================
-# 4. TRAINING LOOPS (UNET + Classifier)
-# ==========================================
+
 
 def train_unet(batch_size=64, num_time_steps=1000, num_epochs=30, seed=-1, ema_decay=0.9999, lr=2e-5, checkpoint_path=""):
     os.makedirs('mnist-checkpoints', exist_ok=True)
@@ -315,9 +306,7 @@ def train_classifier(batch_size=64, num_time_steps=1000, num_epochs=10, lr=1e-4)
         torch.save(classifier.state_dict(), 'mnist-checkpoints/noisy_classifier.pth')
 
 
-# ==========================================
-# 5. GUIDED INFERENCE
-# ==========================================
+
 
 def inference(checkpoint_path: str, num_time_steps: int = 1000, ema_decay: float = 0.9999, 
               classifier: nn.Module = None, target_class: int = 8, guidance_scale: float = 2.0):

@@ -1,13 +1,12 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision import datasets, transforms, utils
+import torch                                                    #type: ignore
+import torch.nn as nn                                           #type: ignore                                        
+import torch.nn.functional as F                                 #type: ignore
+from torchvision import datasets, transforms, utils             #type: ignore
 import os
 import math
 import shutil
-from pytorch_fid.fid_score import calculate_fid_given_paths
+from pytorch_fid.fid_score import calculate_fid_given_paths     #type: ignore
 
-# --- 1. LIGHTWEIGHT SETTINGS ---
 SCHEDULE_NAME = "linear" 
 CHECKPOINT_STEPS = [5, 10, 15, 20, 25, 30] 
 NUM_GEN_IMAGES = 500    
@@ -79,17 +78,27 @@ class WideResUNet(nn.Module):
 
     def forward(self, x, t):
         t_emb = self.time_mlp(t)
-        x1 = self.inc(x); x2 = self.down1(x1, t_emb)
-        x3 = F.max_pool2d(x2, 2); x4 = self.down2(x3, t_emb)
-        m = self.mid1(x4, t_emb); m = self.attn(m); m = self.mid2(m, t_emb)
-        u1 = self.up1(m); u1 = torch.cat([u1, x2], 1); u1 = self.res_up1(u1, t_emb)
-        u2 = self.up2(u1); u2 = torch.cat([u2, x1], 1); u2 = self.res_up2(u2, t_emb)
+        x1 = self.inc(x)
+        x2 = self.down1(x1, t_emb)
+        x3 = F.max_pool2d(x2, 2)
+        x4 = self.down2(x3, t_emb)
+        m = self.mid1(x4, t_emb)
+        m = self.attn(m)
+        m = self.mid2(m, t_emb)
+        u1 = self.up1(m)
+        u1 = torch.cat([u1, x2], 1)
+        u1 = self.res_up1(u1, t_emb)
+        u2 = self.up2(u1)
+        u2 = torch.cat([u2, x1], 1)
+        u2 = self.res_up2(u2, t_emb)
         return self.outc(u2)
 
-# --- 3. HELPER FUNCTIONS ---
 
 def get_beta_schedule(name, timesteps):
-    if name == "linear": return torch.linspace(0.0001, 0.02, timesteps)
+
+    if name == "linear":
+        return torch.linspace(0.0001, 0.02, timesteps)
+    
     elif name == "cosine":
         steps = timesteps + 1
         x = torch.linspace(0, timesteps, steps)
@@ -97,10 +106,12 @@ def get_beta_schedule(name, timesteps):
         alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
         betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
         return torch.clip(betas, 0.0001, 0.999)
+    
     return None
 
 def prepare_real_images():
-    if len(os.listdir(REAL_DIR)) >= NUM_GEN_IMAGES: return
+    if len(os.listdir(REAL_DIR)) >= NUM_GEN_IMAGES:
+        return
     print(f"Extracting {NUM_GEN_IMAGES} real images...")
     dataset = datasets.MNIST('./data', train=True, download=True, transform=transforms.ToTensor())
     for i in range(NUM_GEN_IMAGES):
@@ -109,7 +120,8 @@ def prepare_real_images():
 
 @torch.no_grad()
 def generate_images(model, schedule_name, save_dir):
-    if os.path.exists(save_dir): shutil.rmtree(save_dir)
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
     os.makedirs(save_dir)
     
     betas = get_beta_schedule(schedule_name, timesteps).to(device)
@@ -134,7 +146,6 @@ def generate_images(model, schedule_name, save_dir):
         print(f"Generating: {((b+1)*BATCH_SIZE)}/{NUM_GEN_IMAGES}", end="\r")
     print()
 
-# --- 4. EXECUTION LOOP ---
 
 if __name__ == "__main__":
     prepare_real_images()

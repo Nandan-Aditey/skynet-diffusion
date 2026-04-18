@@ -1,14 +1,13 @@
 #ALL IN ONE CODE: EBM and DDPM training + generation & visualization
 #this does NOT hv FID comparison yet, just for pretty looking plots purposes
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import torch                            #type: ignore
+import torch.nn as nn                   #type: ignore
+import torch.optim as optim             #type: ignore
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-from tqdm import tqdm
-import math
+from tqdm import tqdm                   #type: ignore
+import math 
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'

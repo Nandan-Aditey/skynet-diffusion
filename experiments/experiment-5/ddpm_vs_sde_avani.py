@@ -1,11 +1,10 @@
-import torch
-import torch.nn as nn
+import torch                    #type: ignore
+import torch.nn as nn           #type: ignore
 import numpy as np
 import matplotlib
 # Use the 'Agg' backend for headless server environments
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 from sklearn.datasets import make_swiss_roll
 import random
 

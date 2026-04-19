@@ -1,5 +1,4 @@
 import torch
-from torchvision import transforms
 import matplotlib.pyplot as plt
 
 from diffusion import DDIMReverseProcess
@@ -24,7 +23,7 @@ def generate_images_ddim(num_images=16, ddim_steps=50):
     time_steps = list(range(num_timesteps - 1, -1, -step_size))
     
     print(f"Starting generation in {ddim_steps} steps...")
-    
+     
     with torch.no_grad():
         x = torch.randn(num_images, channels, img_size, img_size).to(device)
         
@@ -33,7 +32,7 @@ def generate_images_ddim(num_images=16, ddim_steps=50):
             t = torch.full((num_images,), current_t, dtype=torch.long, device=device)
         
             if i == len(time_steps) - 1:
-                next_t = -1 # If we are on the last loop, jump to -1 (perfectly clean)
+                next_t = -1
             else:
                 next_t = time_steps[i + 1]
                 

@@ -1,11 +1,9 @@
 import torch
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 from diffusion import DiffusionReverseProcess, DDIMReverseProcess
 from unet import Unet
-
-
-# --- Modular Helper Functions ---
 
 def sample_ddpm(model, process, x, device):
     with torch.no_grad():
@@ -15,7 +13,7 @@ def sample_ddpm(model, process, x, device):
             x, _ = process.sample_prev_timestep(x, predicted_noise, t)
     return format_for_plot(x)
 
-def sample_ddim(model, process, x, device, steps=50):
+def sample_ddim(model, process, x, device, steps):
     step_size = 1000 // steps
     time_steps = list(range(999, -1, -step_size))
     
@@ -50,6 +48,22 @@ def plot_showdown(d1, d2, i1, i2):
     plt.tight_layout()
     plt.show()
 
+def plot_showdown(d1, d2, i1, i2):
+    fig, axes = plt.subplots(4, 8, figsize=(16, 8))
+    row_labels = ["DDPM (Run 1)", "DDPM (Run 2)", "DDIM (Run 1)", "DDIM (Run 2)"]
+    rows = [d1, d2, i1, i2]
+    
+    for row_idx, (row_data, label) in enumerate(zip(rows, row_labels)):
+        for col_idx in range(8):
+            ax = axes[row_idx, col_idx]
+            ax.imshow(row_data[col_idx].squeeze(), cmap='gray')
+            ax.axis('off')
+            if col_idx == 0:
+                ax.set_title(label, loc='left', fontsize=12, fontweight='bold', pad=10)
+                
+    plt.tight_layout()
+    plt.show()
+
 def run_diffusion_showdown(model_path):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Running Showdown on: {device}')
@@ -61,6 +75,7 @@ def run_diffusion_showdown(model_path):
     ddpm_process = DiffusionReverseProcess().to(device)
     ddim_process = DDIMReverseProcess().to(device)
 
+    # Use 8 fixed noise samples
     fixed_noise = torch.randn(8, 1, 32, 32).to(device)
     
     print("Starting DDPM Run 1 (1000 steps)...")
@@ -70,12 +85,24 @@ def run_diffusion_showdown(model_path):
     ddpm_results_2 = sample_ddpm(model, ddpm_process, fixed_noise.clone(), device)
     
     print("Starting DDIM Run 1 (50 steps)...")
-    ddim_results_1 = sample_ddim(model, ddim_process, fixed_noise.clone(), device, steps=50)
+    ddim_results_1 = sample_ddim(model, ddim_process, fixed_noise.clone(), device, steps=1)
     
     print("Starting DDIM Run 2 (50 steps)...")
-    ddim_results_2 = sample_ddim(model, ddim_process, fixed_noise.clone(), device, steps=50)
+    ddim_results_2 = sample_ddim(model, ddim_process, fixed_noise.clone(), device, steps=1)    
+    print("\n--- Quantitative Comparison (MSE) ---")
     
-    print("Plotting results...")
+    # Compare DDPM to itself
+    mse_ddpm = F.mse_loss(ddpm_results_1, ddpm_results_2).item()
+    print(f"Variance between DDPM Runs: {mse_ddpm:.6f} (Stochastic variance)")
+    
+    # Compare DDIM to itself
+    mse_ddim = F.mse_loss(ddim_results_1, ddim_results_2).item()
+    print(f"Variance between DDIM Runs: {mse_ddim:.6f} (Should be near zero)")
+    
+    # Compare DDPM to DDIM (Using Run 1 for both)
+    mse_cross = F.mse_loss(ddpm_results_1, ddim_results_1).item()
+    print(f"Difference between DDPM and DDIM: {mse_cross:.6f} (Solver deviation)")
     plot_showdown(ddpm_results_1, ddpm_results_2, ddim_results_1, ddim_results_2)
 
-run_diffusion_showdown("./ddpm/jashandeep/checkpoints_MNIST/monster_unet_epoch_110.pth")
+# Run it!
+run_diffusion_showdown("./ddpm/jashandeep/checkpoints_MNIST/mnist_unet_epoch_20.pth")

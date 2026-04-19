@@ -9,16 +9,17 @@ from torch.utils.data import DataLoader
 from diffusion import DiffusionReverseProcess
 from unet import Unet
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+channels = 1
+num_steps = 1000
+
+
 # 32x32 is much better for U-Nets than 28x28 apparently?
 transform = transforms.Compose([
     transforms.Resize((32, 32)), 
     transforms.ToTensor(),
     transforms.Normalize((0.5,), (0.5,))
 ])
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-channels = 1
-num_steps = 1000
 
 fashion_ds = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
 fashion_dl = DataLoader(fashion_ds, batch_size=64, shuffle=True) # Batch size 64 is safe for 6GB VRAM
@@ -56,7 +57,7 @@ reverse_process = DiffusionReverseProcess(num_time_steps=num_steps).to(device)
 
 checkpoint_files = glob.glob("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_epoch_*.pth")
 checkpoint_files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
-# FILTER: Keep only every 2th checkpoint
+# FILTER: Keep only every 2nd checkpoint
 checkpoint_files = checkpoint_files[::2] 
 
 if os.path.exists("./ddpm/jashandeep/checkpoints_FMNIST/fashion_unet_final.pth"):
@@ -89,7 +90,7 @@ for ckpt_path in checkpoint_files:
             torch.cuda.empty_cache() 
             print(f"  - Chunk {chunk + 1}/{num_chunks} complete.")
         score = fid.compute()
-        print(f"FID Score for {ckpt_path}: {score.item():.2f}")
+        print(f"FID Score for {ckpt_path}: {score.item():.5f}")
         fid_scores[ckpt_path] = score.item()
         fid.reset()
         fid.update(real_images_bytes, real=True)

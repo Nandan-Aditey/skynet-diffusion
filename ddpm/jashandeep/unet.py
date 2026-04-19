@@ -27,7 +27,6 @@ class NormActConv(nn.Module):
 
 #Time Embedding
 def get_time_embedding(time_steps: torch.Tensor, t_emb_dim: int) -> torch.Tensor:
-    """Transforms a time integer into a 128-dimensional barcode."""
     assert t_emb_dim % 2 == 0, "time embedding must be divisible by 2."
     
     factor = 2 * torch.arange(start=0, end=t_emb_dim//2, dtype=torch.float32, device=time_steps.device) / t_emb_dim

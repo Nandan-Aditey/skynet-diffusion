@@ -1,7 +1,5 @@
-import torch
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
-
+import torch                            #type: ignore
+import matplotlib.pyplot as plt         #type: ignore
 from ddpm.jashandeep.diffusion import DiffusionReverseProcess, DDIMReverseProcess
 from ddpm.jashandeep.unet import Unet
 
@@ -48,22 +46,6 @@ def plot_showdown(d1, d2, i1, i2):
     plt.tight_layout()
     plt.show()
 
-def plot_showdown(d1, d2, i1, i2):
-    fig, axes = plt.subplots(4, 8, figsize=(16, 8))
-    row_labels = ["DDPM (Run 1)", "DDPM (Run 2)", "DDIM (Run 1)", "DDIM (Run 2)"]
-    rows = [d1, d2, i1, i2]
-    
-    for row_idx, (row_data, label) in enumerate(zip(rows, row_labels)):
-        for col_idx in range(8):
-            ax = axes[row_idx, col_idx]
-            ax.imshow(row_data[col_idx].squeeze(), cmap='gray')
-            ax.axis('off')
-            if col_idx == 0:
-                ax.set_title(label, loc='left', fontsize=12, fontweight='bold', pad=10)
-                
-    plt.tight_layout()
-    plt.show()
-
 def run_diffusion_showdown(model_path):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Running Showdown on: {device}')
@@ -89,6 +71,8 @@ def run_diffusion_showdown(model_path):
     
     print("Starting DDIM Run 2 (50 steps)...")
     ddim_results_2 = sample_ddim(model, ddim_process, fixed_noise.clone(), device, steps=1)    
+
+    return ddpm_results_1, ddpm_results_2, ddim_results_1, ddim_results_2
     
 
-run_diffusion_showdown("./ddpm/jashandeep/checkpoints_MNIST/mnist_unet_epoch_20.pth")
+ddpm_results_1, ddpm_results_2, ddim_results_1, ddim_results_2 = run_diffusion_showdown("./ddpm/jashandeep/checkpoints_MNIST/mnist_unet_epoch_20.pth")

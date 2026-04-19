@@ -1,7 +1,7 @@
 
 # SkyNet — Diffusion Models
 
-This repository contains our term project for **UMC203: Introduction to AI and ML** at the **Indian Institute of Science (IISc)**. The project focuses on a systematic study of **diffusion models**, a class of generative models that have recently emerged as a dominant paradigm in generative modeling.
+This repository contains our term project for **UMC 203: Introduction to AI and ML** at the **Indian Institute of Science (IISc)**. The project focuses on a systematic study of **diffusion models**, a class of generative models that have recently emerged as a dominant paradigm in generative modeling.
 
 ## 1. Introduction
 

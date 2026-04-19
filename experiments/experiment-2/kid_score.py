@@ -5,10 +5,9 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from torchmetrics.image.kid import KernelInceptionDistance
 
-# Your custom modules
-from unet import Unet
-from diffusion import DiffusionReverseProcess, DDIMReverseProcess
-from ddim_ddpm_img_diff import sample_ddpm, sample_ddim
+from ddpm.jashandeep.unet import Unet
+from ddpm.jashandeep.diffusion import DiffusionReverseProcess, DDIMReverseProcess
+from experiment6.ddim_ddpm_img_diff import sample_ddpm, sample_ddim
 
 def run_speed_and_quality_test(num_images):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -48,7 +47,6 @@ def run_speed_and_quality_test(num_images):
         real_img_batches.append(imgs_uint8)
         real_processed += current_bs
 
-    # Helper to feed real images to KID (needed because kid.reset() clears real features too)
     def populate_kid_with_reals():
         for b in real_img_batches:
             kid.update(b, real=True)
@@ -75,7 +73,6 @@ def run_speed_and_quality_test(num_images):
             torch.cuda.synchronize() 
             total_ddpm_time += (time.perf_counter() - start_time)
             
-            # Format and update metric
             fake_imgs = fake_imgs.to(device)
             fake_imgs_uint8 = (fake_imgs.repeat(1, 3, 1, 1) * 255).to(torch.uint8)
             kid.update(fake_imgs_uint8, real=False)
@@ -89,7 +86,7 @@ def run_speed_and_quality_test(num_images):
         print(f"DDPM (1000) -> Time: {total_ddpm_time:.5f}s | KID: {kid_mean.item():.5f}")
         kid.reset()
 
-        # --- DDIM TESTS ---
+        #DDIM
         for steps in ddim_step_counts:
             print(f"Running DDIM ({steps} steps)...")
             populate_kid_with_reals()

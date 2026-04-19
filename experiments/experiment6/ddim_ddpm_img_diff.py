@@ -2,8 +2,8 @@ import torch
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 
-from diffusion import DiffusionReverseProcess, DDIMReverseProcess
-from unet import Unet
+from ddpm.jashandeep.diffusion import DiffusionReverseProcess, DDIMReverseProcess
+from ddpm.jashandeep.unet import Unet
 
 def sample_ddpm(model, process, x, device):
     with torch.no_grad():
@@ -89,20 +89,6 @@ def run_diffusion_showdown(model_path):
     
     print("Starting DDIM Run 2 (50 steps)...")
     ddim_results_2 = sample_ddim(model, ddim_process, fixed_noise.clone(), device, steps=1)    
-    print("\n--- Quantitative Comparison (MSE) ---")
     
-    # Compare DDPM to itself
-    mse_ddpm = F.mse_loss(ddpm_results_1, ddpm_results_2).item()
-    print(f"Variance between DDPM Runs: {mse_ddpm:.6f} (Stochastic variance)")
-    
-    # Compare DDIM to itself
-    mse_ddim = F.mse_loss(ddim_results_1, ddim_results_2).item()
-    print(f"Variance between DDIM Runs: {mse_ddim:.6f} (Should be near zero)")
-    
-    # Compare DDPM to DDIM (Using Run 1 for both)
-    mse_cross = F.mse_loss(ddpm_results_1, ddim_results_1).item()
-    print(f"Difference between DDPM and DDIM: {mse_cross:.6f} (Solver deviation)")
-    plot_showdown(ddpm_results_1, ddpm_results_2, ddim_results_1, ddim_results_2)
 
-# Run it!
 run_diffusion_showdown("./ddpm/jashandeep/checkpoints_MNIST/mnist_unet_epoch_20.pth")
